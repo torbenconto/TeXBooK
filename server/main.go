@@ -13,13 +13,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 var (
 	allowedExts = map[string]bool{".tex": true}
-	pdfJobChan  = make(chan PDFJob, 1000)
+	watchersMap = make(map[uint32]*Watcher)
+	jobQueue    = make(chan CacheJob, 200)
 )
 
 func collectFiles(fsys fs.FS, dir string) ([]string, error) {
@@ -41,6 +44,7 @@ type DataSource interface {
 	Disconnect() error
 	Type() string
 	Describe() map[string]any
+	ID() uint32
 }
 
 type FileSystemAccessible interface {
@@ -55,7 +59,8 @@ func GetFileSystem(ds DataSource) (fs.FS, error) {
 }
 
 type LocalDataSource struct {
-	Path string
+	Path    string
+	IDField uint32
 }
 
 func (l *LocalDataSource) FS() (fs.FS, error) {
@@ -66,6 +71,8 @@ func (l *LocalDataSource) FS() (fs.FS, error) {
 }
 
 func (l *LocalDataSource) Type() string { return "local" }
+func (l *LocalDataSource) ID() uint32   { return l.IDField }
+
 func (l *LocalDataSource) Describe() map[string]any {
 	return map[string]any{"type": "local", "path": l.Path}
 }
@@ -84,12 +91,54 @@ func (l *LocalDataSource) Disconnect() error { return nil }
 
 type DataSourceStored map[string]DataSource
 
+func startWatchingDataSource(fsWatcher *fsnotify.Watcher, ds DataSource) {
+	local, ok := ds.(*LocalDataSource)
+	if !ok {
+		log.Printf("Skipping non-local data source: %d", ds.ID())
+		return
+	}
+
+	watcher := NewWatcher(fsWatcher, ds, jobQueue)
+	watchersMap[ds.ID()] = watcher
+
+	go watcher.Start()
+	watcher.WarmUpExistingFiles()
+
+	watcher.AddDirAndSubDirs(local.Path)
+}
+
 func main() {
-	startPDFWorkerPool(4, pdfJobChan)
+	fsWatcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	processor := NewJobProcessor(jobQueue)
+	processor.Start()
 
 	router := gin.Default()
 	dataSourceStore, _ := New[DataSourceStored]("TeXBooK.db", "DataSourceStore")
 	gob.Register(&LocalDataSource{})
+
+	stored, err := dataSourceStore.Get()
+	if err != nil {
+		log.Fatalf("failed to load data source store: %v", err)
+	}
+	for _, ds := range stored {
+		if err := ds.Connect(); err != nil {
+			log.Printf("Failed to connect to data source %d: %v", ds.ID(), err)
+			continue
+		}
+		startWatchingDataSource(fsWatcher, ds)
+
+		if localDS, ok := ds.(*LocalDataSource); ok {
+			w := NewWatcher(fsWatcher, localDS, jobQueue)
+			watchersMap[ds.ID()] = w
+			w.AddDirAndSubDirs(localDS.Path)
+			go w.Start()
+			go w.WarmUpExistingFiles()
+		}
+	}
 
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:5173", "https://bambu-portal-v2.vercel.app", "https://www.bambu-portal-v2.vercel.app"},
@@ -134,11 +183,19 @@ func main() {
 
 				switch input.Type {
 				case "local":
-					stored[input.Name] = &LocalDataSource{Path: input.Path}
+					ds := &LocalDataSource{Path: input.Path, IDField: uuid.New().ID()}
+					stored[input.Name] = ds
 					if err := dataSourceStore.Save(stored); err != nil {
 						ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 						return
 					}
+
+					if err := ds.Connect(); err != nil {
+						ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to connect to data source"})
+						return
+					}
+					startWatchingDataSource(fsWatcher, ds)
+
 					ctx.JSON(http.StatusOK, gin.H{"status": "data source added"})
 				default:
 					ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "unsupported data source type"})
@@ -265,14 +322,9 @@ func main() {
 				out := make([]gin.H, 0, len(files))
 				for _, file := range files {
 					absPath := filepath.Join(stored[source].(*LocalDataSource).Path, file)
-					select {
-					case pdfJobChan <- PDFJob{TeXPath: absPath, DataSource: source}:
-					default:
-						log.Printf("[warn] thumbnail queue full, skipping %s", absPath)
-					}
 
 					hash := sha1.Sum([]byte(absPath))
-					thumbPath := fmt.Sprintf("/cache/%s/%x.pdf", source, hash)
+					thumbPath := fmt.Sprintf("/cache/%x.pdf", hash)
 					out = append(out, gin.H{"path": file, "thumbnail": thumbPath})
 				}
 				ctx.JSON(http.StatusOK, gin.H{"files": out})

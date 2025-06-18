@@ -3,23 +3,29 @@ package main
 import (
 	"crypto/sha1"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 func sum(path string) ([20]byte, error) {
 	return sha1.Sum([]byte(path)), nil
 }
 
-func cache(texPath string, dataSource string) ([20]byte, string, error) {
+func cache(texPath string) ([20]byte, string, error) {
 	hash, err := sum(texPath)
 	if err != nil {
 		return [20]byte{}, "", nil
 	}
 
-	outputDir := filepath.Join("cache", dataSource)
+	outputDir := "cache"
 
 	cachedPath := filepath.Join(outputDir, fmt.Sprintf("%x", hash)+".pdf")
 	if _, err := os.Stat(cachedPath); err == nil {
@@ -46,22 +52,142 @@ func cache(texPath string, dataSource string) ([20]byte, string, error) {
 	return hash, cachedPath, nil
 }
 
-type PDFJob struct {
+type JobProcessor struct {
+	jobQueue         <-chan CacheJob
+	lastProcessedMap map[string]time.Time
+	lastProcessedMu  sync.Mutex
+}
+
+func NewJobProcessor(jobQueue <-chan CacheJob) *JobProcessor {
+	return &JobProcessor{jobQueue: jobQueue, lastProcessedMap: make(map[string]time.Time)}
+}
+
+func (jp *JobProcessor) Start() {
+	go func() {
+		for job := range jobQueue {
+			jp.lastProcessedMu.Lock()
+			lastTime, seen := jp.lastProcessedMap[job.TeXPath]
+			now := time.Now()
+			if seen && now.Sub(lastTime) < 1*time.Second {
+				jp.lastProcessedMu.Unlock()
+				continue
+			}
+			jp.lastProcessedMap[job.TeXPath] = now
+			jp.lastProcessedMu.Unlock()
+
+			log.Printf("[Processor] Caching: %s", job.TeXPath)
+			_, _, err := cache(job.TeXPath)
+			if err != nil {
+				log.Printf("[Processor] Failed to cache %s: %v", job.TeXPath, err)
+			} else {
+				log.Printf("[Processor] Successfully cached %s", job.TeXPath)
+			}
+		}
+	}()
+
+}
+
+type CacheJob struct {
 	TeXPath    string
 	DataSource string
 }
+type Watcher struct {
+	watcher    *fsnotify.Watcher
+	jobQueue   chan CacheJob
+	dataSource DataSource
+}
 
-func startPDFWorkerPool(workerCount int, jobChan <-chan PDFJob) {
-	for i := 0; i < workerCount; i++ {
-		go func(id int) {
-			for job := range jobChan {
-				_, _, err := cache(job.TeXPath, job.DataSource)
-				if err != nil {
-					log.Printf("[worker %d] failed to render %s: %v", id, job.TeXPath, err)
-				} else {
-					log.Printf("[worker %d] rendered thumbnail for %s", id, job.TeXPath)
+func NewWatcher(fsnotifyWatcher *fsnotify.Watcher, dataSource DataSource, queue chan CacheJob) *Watcher {
+	return &Watcher{
+		watcher:    fsnotifyWatcher,
+		jobQueue:   queue,
+		dataSource: dataSource,
+	}
+}
+
+func (w *Watcher) AddDirAndSubDirs(root string) {
+	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			err := w.watcher.Add(path)
+			if err != nil {
+				log.Printf("Failed to watch %s: %v", path, err)
+			}
+		}
+		return nil
+	})
+}
+
+func (w *Watcher) Start() {
+	defer w.watcher.Close()
+
+	for {
+		select {
+		case event, ok := <-w.watcher.Events:
+			if !ok {
+				return
+			}
+
+			if event.Op&(fsnotify.Create|fsnotify.Write) != 0 {
+				info, err := os.Stat(event.Name)
+				if err != nil || info.IsDir() {
+					continue
+				}
+				if strings.HasSuffix(strings.ToLower(info.Name()), ".tex") {
+					w.jobQueue <- CacheJob{
+						TeXPath: event.Name,
+					}
 				}
 			}
-		}(i)
+
+			if event.Op&fsnotify.Remove != 0 {
+				if strings.HasSuffix(strings.ToLower(event.Name), ".tex") {
+					hash, err := sum(event.Name)
+					if err != nil {
+						log.Printf("[Watcher] Failed to hash deleted file: %v", err)
+						continue
+					}
+					cachedPath := filepath.Join("cache", fmt.Sprintf("%x", hash)+".pdf")
+					cachedPath = strings.ReplaceAll(cachedPath, "\\", "/")
+					cachedPath = strings.TrimLeft(cachedPath, "/\\")
+					log.Println(cachedPath)
+					if err := os.Remove(cachedPath); err != nil && !os.IsNotExist(err) {
+						log.Printf("[Watcher] Failed to delete cached PDF: %v", err)
+					} else {
+						log.Printf("[Watcher] Deleted cached PDF for: %s", event.Name)
+					}
+				}
+			}
+
+		case err, ok := <-w.watcher.Errors:
+			if !ok {
+				return
+			}
+			log.Printf("watcher error: %v", err)
+		}
+	}
+}
+
+func (w *Watcher) WarmUpExistingFiles() {
+	err := filepath.WalkDir(w.dataSource.(*LocalDataSource).Path, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(strings.ToLower(d.Name()), ".tex") {
+			hash, err := sum(path)
+			if err != nil {
+				return nil
+			}
+			cachedPath := filepath.Join("cache", fmt.Sprintf("%x", hash)+".pdf")
+			if _, err := os.Stat(cachedPath); os.IsNotExist(err) {
+				w.jobQueue <- CacheJob{TeXPath: path}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		log.Printf("Warm-up failed for %d: %v", w.dataSource.ID(), err)
 	}
 }

@@ -120,7 +120,7 @@ export default function Home() {
 
               return (
                 <div key={path} className="flex flex-col items-center">
-                  <div className="w-48 aspect-[3/6] bg-gray-100 flex items-center justify-center overflow-hidden rounded-md">
+                  <div className="w-48 aspect-[5/9] bg-gray-100 flex items-center justify-center overflow-hidden rounded-md">
                     <Document
                       file={fileUrl}
                       loading={
