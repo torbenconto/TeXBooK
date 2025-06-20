@@ -14,6 +14,6 @@ func Ping(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "ok",
-		"latency": latency.Nanoseconds(),
+		"latency": latency.Milliseconds(),
 	})
 }

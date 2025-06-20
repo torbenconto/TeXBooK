@@ -58,6 +58,7 @@ func RegisterRoutes(r *gin.Engine) error {
 				// /api/v1/datasources/:name/fs
 				{
 					fs.GET("/list", dsHandler.ListFiles)
+					fs.GET("/file", dsHandler.File)
 				}
 			}
 		}

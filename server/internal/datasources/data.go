@@ -1,6 +1,8 @@
 package datasources
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 )
@@ -14,6 +16,7 @@ type DataSource interface {
 	ID() uint32
 	Metadata() map[string]any
 	ListFiles() (FileNode, error)
+	ReadFile(string) ([]byte, error)
 }
 
 type BaseDataSource struct {
@@ -53,25 +56,35 @@ type FileNode struct {
 	Name     string     `json:"name"`
 	IsDir    bool       `json:"isDir"`
 	Children []FileNode `json:"children,omitempty"`
+	Hash     string     `json:"hash"`
 }
 
 func buildTree(root string) (FileNode, error) {
-	info, err := os.Stat(root)
+	absPath, err := filepath.Abs(root)
 	if err != nil {
 		return FileNode{}, err
 	}
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return FileNode{}, err
+	}
+
+	hash := sha1.Sum([]byte(absPath))
+	hashStr := hex.EncodeToString(hash[:])
 
 	if !info.IsDir() {
 		if filepath.Ext(info.Name()) == ".tex" {
 			return FileNode{
 				Name:  info.Name(),
 				IsDir: false,
+				Hash:  hashStr,
 			}, nil
 		}
 		return FileNode{}, nil
 	}
 
-	entries, err := os.ReadDir(root)
+	entries, err := os.ReadDir(absPath)
 	if err != nil {
 		return FileNode{}, err
 	}
@@ -79,10 +92,11 @@ func buildTree(root string) (FileNode, error) {
 	node := FileNode{
 		Name:  info.Name(),
 		IsDir: true,
+		Hash:  hashStr,
 	}
 
 	for _, entry := range entries {
-		childPath := filepath.Join(root, entry.Name())
+		childPath := filepath.Join(absPath, entry.Name())
 		childNode, err := buildTree(childPath)
 		if err != nil {
 			return FileNode{}, err
@@ -106,4 +120,8 @@ func (l *LocalDataSource) ListFiles() (FileNode, error) {
 	}
 
 	return tree, nil
+}
+
+func (l *LocalDataSource) ReadFile(path string) ([]byte, error) {
+	return os.ReadFile(filepath.Join(l.Path(), path))
 }
