@@ -3,8 +3,10 @@ package datasources
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type DataSource interface {
@@ -15,7 +17,7 @@ type DataSource interface {
 	// uuid
 	ID() uint32
 	Metadata() map[string]any
-	ListFiles() (FileNode, error)
+	ListFiles(subPath string) (FileNode, error)
 	ReadFile(string) ([]byte, error)
 }
 
@@ -74,14 +76,18 @@ func buildTree(root string) (FileNode, error) {
 	hashStr := hex.EncodeToString(hash[:])
 
 	if !info.IsDir() {
-		if filepath.Ext(info.Name()) == ".tex" {
-			return FileNode{
-				Name:  info.Name(),
-				IsDir: false,
-				Hash:  hashStr,
-			}, nil
+		if filepath.Ext(info.Name()) != ".tex" {
+			return FileNode{}, nil
 		}
-		return FileNode{}, nil
+
+		hash := sha1.Sum([]byte(absPath))
+		hashStr := hex.EncodeToString(hash[:])
+
+		return FileNode{
+			Name:  info.Name(),
+			IsDir: false,
+			Hash:  hashStr,
+		}, nil
 	}
 
 	entries, err := os.ReadDir(absPath)
@@ -113,13 +119,23 @@ func buildTree(root string) (FileNode, error) {
 	return node, nil
 }
 
-func (l *LocalDataSource) ListFiles() (FileNode, error) {
-	tree, err := buildTree(l.Path())
-	if err != nil {
-		return FileNode{}, err
+func (l *LocalDataSource) ListFiles(subPath string) (FileNode, error) {
+	cleanSub := filepath.Clean(subPath)
+
+	if cleanSub == "." || cleanSub == "" {
+		cleanSub = ""
 	}
 
-	return tree, nil
+	fullPath := filepath.Join(l.Path(), cleanSub)
+
+	base := filepath.Clean(l.Path())
+	full := filepath.Clean(fullPath)
+
+	if !strings.HasPrefix(full, base+string(os.PathSeparator)) && full != base {
+		return FileNode{}, fmt.Errorf("invalid path")
+	}
+
+	return buildTree(full)
 }
 
 func (l *LocalDataSource) ReadFile(path string) ([]byte, error) {

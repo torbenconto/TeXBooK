@@ -11,6 +11,7 @@ import (
 // /api/v1/datasources/:name/fs/list
 func (d *DataSourceHandler) ListFiles(c *gin.Context) {
 	source := c.Param("name")
+	path := c.Query("path")
 
 	stored, err := d.DataSourceStore.Get()
 	if err != nil {
@@ -26,7 +27,7 @@ func (d *DataSourceHandler) ListFiles(c *gin.Context) {
 		return
 	}
 
-	json, err := ds.ListFiles()
+	json, err := ds.ListFiles(path)
 	if err != nil {
 		logger.Log.WithError(err).WithField("data_source", source).Error("failed to list files")
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to list files"})
