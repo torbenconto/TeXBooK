@@ -1,4 +1,4 @@
-package main
+package repository
 
 import (
 	"bytes"
@@ -7,8 +7,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/torbenconto/TeXBooK/internal/datasources"
 	"go.etcd.io/bbolt"
 )
+
+type StoredDataSources map[string]datasources.DataSource
 
 type Store[T any] struct {
 	db         *bbolt.DB
@@ -25,7 +28,7 @@ func New[T any](path, bucketName string) (*Store[T], error) {
 	}
 
 	db.Update(func(tx *bbolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(bucketName))
+		tx.CreateBucketIfNotExists([]byte(bucketName))
 		return err
 	})
 
