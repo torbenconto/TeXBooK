@@ -35,6 +35,7 @@ export default function Home() {
   const [newSourceName, setNewSourceName] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
   const [newSourcePath, setNewSourcePath] = useState("");
+  const [searchBarContent, setSearchBarContent] = useState("");
 
   useEffect(() => {
     const pathParam = searchParams.get("path");
@@ -89,7 +90,6 @@ export default function Home() {
         const json = await res.json();
         setFiles(json || []);
 
-        // No ui popping in and out during load
         const elapsed = performance.now() - start;
         const delay = Math.max(0, MIN_LOAD_DURATION - elapsed);
         setTimeout(() => {
@@ -103,7 +103,6 @@ export default function Home() {
 
     fetchFiles();
   }, [selectedSource, currentPath]);
-
 
   useEffect(() => {
     async function fetchPing() {
@@ -170,45 +169,47 @@ export default function Home() {
       </header>
 
       <main className="flex-grow p-8 bg-gray-100 transition-all duration-300">
-        <div className="flex items-center flex-wrap bg-gray-100 p-2 border border-gray-300 rounded-lg mb-4 shadow-sm text-sm">
-          <button
-                onClick={() => {
-                  setCurrentPath([])
-                }}
-                className="text-[#098842] text-md hover:underline font-medium transition-colors"
-              >
-                root
-              </button>
-          <span className="mx-2 text-gray-500">/</span>
-          {currentPath.map((elem: string, idx: number) => (
-            <div key={idx} className="flex items-center">
-              <button
-                onClick={() => {
-                  setCurrentPath(currentPath.slice(0,idx + 1))
-                }}
-                className="text-[#098842] text-md hover:underline font-medium transition-colors"
-              >
-                {elem}
-              </button>
-              {idx < currentPath.length - 1 && (
-                <span className="mx-2 text-gray-500">/</span>
-              )}
-            </div>
-          ))}
+        <div className="flex w-full gap-2">
+        {/* Breadcrumb path display */}
+          <div className="flex items-center flex-wrap w-full bg-gray-100 p-2 border border-gray-300 rounded-lg mb-4 shadow-sm text-sm">
+            <button
+              onClick={() => {
+                setCurrentPath([])
+              }}
+              className="text-[#098842] text-md hover:underline font-medium transition-colors"
+            >
+              root
+            </button>
+            <span className="mx-2 text-gray-500">/</span>
+            {currentPath.map((elem: string, idx: number) => (
+              <div key={idx} className="flex items-center">
+                <button
+                  onClick={() => {
+                    setCurrentPath(currentPath.slice(0, idx + 1))
+                  }}
+                  className="text-[#098842] text-md hover:underline font-medium transition-colors"
+                >
+                  {elem}
+                </button>
+                {idx < currentPath.length - 1 && (
+                  <span className="mx-2 text-gray-500">/</span>
+                )}
+              </div>
+            ))}
+          </div>        
+          {/* Search bar inline with path view */}
+          <div className="flex justify-end mb-4">
+            <input
+              type="text"
+              placeholder="Search files..."
+              value={searchBarContent}
+              onChange={(e) => setSearchBarContent(e.target.value)}
+              className="w-full sm:w-64 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none transition"
+            />
+          </div>
         </div>
-
-        {/* {currentPath.length > 0 && (
-          <button
-            onClick={() => setCurrentPath((prev) => prev.slice(0, -1))}
-            className="mb-4 text-sm text-blue-600 hover:underline"
-          >
-            ← Back
-          </button>
-        )} */}
-
         {filesError && <p className="text-red-600">Error: {filesError}</p>}
 
-        {/* Render a skeleton for loading */}
         {filesLoading && (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
             {Array.from({ length: 8 }).map((_, idx) => (
@@ -238,6 +239,15 @@ export default function Home() {
                 return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
               })
               .map((file) => {
+                const searchTerms = searchBarContent
+                .trim()
+                .toLowerCase()
+                .split(/\s+/)
+                .filter(term => term.length > 0);
+
+              const matchesSearch =
+                searchTerms.length === 0 ||
+                searchTerms.every(term => file.name.toLowerCase().includes(term));
                 const encodedPath = encodeURIComponent(
                   currentPath.join("/") + "/cache/" + file.hash + ".pdf"
                 );
@@ -245,6 +255,7 @@ export default function Home() {
                   selectedSource!
                 )}/fs/file?path=${encodedPath}`;
 
+                
                 if (file.isDir) {
                   return (
                     <button
@@ -253,7 +264,9 @@ export default function Home() {
                         setFilesLoading(true);
                         setTimeout(() => setCurrentPath([...currentPath, file.name]), 50);
                       }}
-                      className="group transition-transform duration-200 hover:shadow-xl rounded-2xl border border-gray-300 shadow-sm bg-white overflow-hidden flex flex-col items-center justify-center p-6 cursor-pointer"
+                      className={`group transition-transform duration-200 hover:shadow-xl aspect-[8.5/11] rounded-2xl border border-gray-300 shadow-sm bg-white overflow-hidden flex flex-col items-center justify-center p-6 cursor-pointer ${
+                          matchesSearch ? "" : "hidden"
+                        }`}                      
                       title={file.name}
                     >
                       <div className="text-gray-600 mb-3">
@@ -276,7 +289,9 @@ export default function Home() {
                     <a
                       key={file.name}
                       href={`/viewer/${selectedSource}?path=${encodedPath}`}
-                      className="group transition-transform duration-200 hover:shadow-xl rounded-2xl border border-gray-300 shadow-sm bg-white overflow-hidden"
+                      className={`group transition-transform duration-200 hover:shadow-xl rounded-2xl border border-gray-300 shadow-sm bg-white overflow-hidden ${
+                        matchesSearch ? "" : "hidden"
+                      }`}
                     >
                       <div className="aspect-[8.5/11] w-full bg-gray-50 flex items-center justify-center overflow-hidden">
                       {fileUrl && (
@@ -309,6 +324,7 @@ export default function Home() {
               })}
         </div>
       </main>
+      
       {showAddSource && (
         <div className="fixed inset-0 bg-white/30 backdrop-blur-md flex justify-center items-center z-50">
           <div className="bg-white p-6 rounded-sm shadow-lg w-full max-w-md">
@@ -327,8 +343,6 @@ export default function Home() {
               onChange={(e) => setNewSourcePath(e.target.value)}
               className="w-full border border-gray-300 rounded px-3 py-2 mb-4"
             />
-
-
             {addError && <p className="text-red-600 text-sm mb-2">{addError}</p>}
             <div className="flex justify-end gap-2">
               <button
