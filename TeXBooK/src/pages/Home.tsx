@@ -229,6 +229,7 @@ export default function Home() {
           }`}
         >
           {files &&
+            !filesLoading &&
             files.isDir &&
             [...files.children]
               .sort((a, b) => {
