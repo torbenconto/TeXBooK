@@ -107,7 +107,7 @@ func (d *DataSourceHandler) ListDataSources(c *gin.Context) {
 		return
 	}
 
-	var out []gin.H
+	out := make([]gin.H, 0)
 	for name, ds := range stored {
 		meta := gin.H{
 			"type": ds.Type(),

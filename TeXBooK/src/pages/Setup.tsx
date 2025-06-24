@@ -46,7 +46,7 @@ function Setup() {
     }
 
     try {
-      const res = await fetch(API_URL + "/api/data/add", {
+      const res = await fetch(API_URL + "/api/v1/datasources/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -138,7 +138,12 @@ export default function Home() {
           <select
             id="data-source-select"
             value={selectedSource ?? ""}
-            onChange={(e) => setSelectedSource(e.target.value)}
+            onChange={(e) => {
+              setCurrentPath([])
+              searchParams.set("path", "")
+              setSearchParams(searchParams)
+              setSelectedSource(e.target.value)
+            }}
             className="border border-gray-300 rounded-md p-1"
           >
             {data?.map((source) => (
