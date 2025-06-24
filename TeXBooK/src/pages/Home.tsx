@@ -264,7 +264,7 @@ export default function Home() {
                         setFilesLoading(true);
                         setTimeout(() => setCurrentPath([...currentPath, file.name]), 50);
                       }}
-                      className={`group transition-transform duration-200 hover:shadow-xl min-h-full min-w-full rounded-2xl border border-gray-300 shadow-sm bg-white overflow-hidden flex flex-col items-center justify-center p-6 cursor-pointer ${
+                      className={`group transition-transform duration-200 hover:shadow-xl aspect-[8.5/11] rounded-2xl border border-gray-300 shadow-sm bg-white overflow-hidden flex flex-col items-center justify-center p-6 cursor-pointer ${
                           matchesSearch ? "" : "hidden"
                         }`}                      
                       title={file.name}
