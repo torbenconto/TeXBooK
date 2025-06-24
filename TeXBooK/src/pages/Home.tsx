@@ -9,11 +9,11 @@ import { useSearchParams } from "react-router-dom";
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 type FileNode = {
-  isDir: boolean
-  name: string
-  hash: string
-  children: FileNode[]
-}
+  isDir: boolean;
+  name: string;
+  hash: string;
+  children: FileNode[];
+};
 
 type DataSource = {
   name: string;
@@ -28,7 +28,7 @@ export default function Home() {
   const [files, setFiles] = useState<FileNode | null>(null);
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState<string | null>(null);
-  const [ping, setPing] = useState<number | null>(null) 
+  const [ping, setPing] = useState<number | null>(null);
   const [currentPath, setCurrentPath] = useState<string[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -40,7 +40,6 @@ export default function Home() {
     }
   }, []);
 
-
   useEffect(() => {
     async function fetchData() {
       try {
@@ -48,7 +47,6 @@ export default function Home() {
         if (!res.ok) throw new Error(`Error ${res.status}: ${res.statusText}`);
         const json = await res.json();
         setData(json);
-
         if (json.length > 0) {
           setSelectedSource(json[0].name || json[0].id || "");
         }
@@ -72,21 +70,29 @@ export default function Home() {
     setFilesError(null);
 
     async function fetchFiles() {
+      const MIN_LOAD_DURATION = 300;
+      const start = performance.now();
+
       try {
         const joinedPath = currentPath.join("/");
-        
-        searchParams.set("path", joinedPath)
-        setSearchParams(searchParams)
-        
+        searchParams.set("path", joinedPath);
+        setSearchParams(searchParams);
+
         const res = await fetch(
           `${API_URL}/api/v1/datasources/${encodeURIComponent(selectedSource!)}/fs/list?path=${encodeURIComponent(joinedPath)}`
         );
         if (!res.ok) throw new Error(`Error ${res.status}: ${res.statusText}`);
         const json = await res.json();
         setFiles(json || []);
+
+        // No ui popping in and out during load
+        const elapsed = performance.now() - start;
+        const delay = Math.max(0, MIN_LOAD_DURATION - elapsed);
+        setTimeout(() => {
+          setFilesLoading(false);
+        }, delay);
       } catch (err: any) {
         setFilesError(err.message || "Unknown error fetching files");
-      } finally {
         setFilesLoading(false);
       }
     }
@@ -98,48 +104,35 @@ export default function Home() {
   useEffect(() => {
     async function fetchPing() {
       const start = performance.now();
-
       try {
         const res = await fetch(`${API_URL}/api/v1/ping`);
-        const json = await res.json();
-
+        await res.json();
         const end = performance.now();
-        const latency = end - start;
-
-        setPing(latency);
-      } catch (err) {
-        console.error("Ping failed:", err);
+        setPing(end - start);
+      } catch {
         setPing(null);
       }
     }
 
-    setInterval(fetchPing, 5000)
-
+    const interval = setInterval(fetchPing, 5000);
     fetchPing();
+
+    return () => clearInterval(interval);
   }, []);
 
   if (loading) return <p>Loading data sources...</p>;
   if (error) return <p className="text-red-600">Error: {error}</p>;
-
-  if (data && data.length === 0) {
-    return <Setup />;
-  }
+  if (data && data.length === 0) return <Setup />;
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
       <header className="w-full flex items-center justify-center relative px-4 py-4 border-b border-gray-200">
         <div className="absolute left-4">
-          {ping != null && (
-            <Signal delay={ping} />
-          )}
-          
+          {ping != null && <Signal delay={ping} />}
         </div>
         <TeXBookLogoSM />
         <div className="absolute right-4 flex items-center gap-2">
-          <label
-            htmlFor="data-source-select"
-            className="text-sm font-medium text-gray-700"
-          >
+          <label htmlFor="data-source-select" className="text-sm font-medium text-gray-700">
             Source:
           </label>
           <select
@@ -157,36 +150,89 @@ export default function Home() {
         </div>
       </header>
 
-      <main className="flex-grow p-8 bg-gray-100 min-h-screen">
-        {currentPath.length > 0 && (
+      <main className="flex-grow p-8 bg-gray-100 transition-all duration-300">
+        <div className="flex items-center flex-wrap bg-gray-100 p-2 border border-gray-300 rounded-lg mb-4 shadow-sm text-sm">
+          <button
+                onClick={() => {
+                  setCurrentPath([])
+                }}
+                className="text-[#098842] text-md hover:underline font-medium transition-colors"
+              >
+                root
+              </button>
+          <span className="mx-2 text-gray-500">/</span>
+          {currentPath.map((elem: string, idx: number) => (
+            <div key={idx} className="flex items-center">
+              <button
+                onClick={() => {
+                  setCurrentPath(currentPath.slice(0,idx + 1))
+                }}
+                className="text-[#098842] text-md hover:underline font-medium transition-colors"
+              >
+                {elem}
+              </button>
+              {idx < currentPath.length - 1 && (
+                <span className="mx-2 text-gray-500">/</span>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* {currentPath.length > 0 && (
           <button
             onClick={() => setCurrentPath((prev) => prev.slice(0, -1))}
             className="mb-4 text-sm text-blue-600 hover:underline"
           >
             ← Back
           </button>
-        )}
+        )} */}
 
-        {filesLoading && <p className="text-lg text-gray-700">Loading files...</p>}
         {filesError && <p className="text-red-600">Error: {filesError}</p>}
 
-        {!filesLoading && files && files.isDir && (
+        {/* Render a skeleton for loading */}
+        {filesLoading && (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
-            {[...files.children]
+            {Array.from({ length: 8 }).map((_, idx) => (
+              <div
+                key={idx}
+                className="animate-pulse rounded-2xl border border-gray-300 bg-white p-6 aspect-[8.5/11] flex flex-col items-center justify-center"
+              >
+                <div className="bg-gray-200 rounded-md w-12 h-12 mb-4" />
+                <div className="h-4 bg-gray-200 rounded w-3/4" />
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div
+          className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6 transition-opacity duration-300 ${
+            filesLoading ? "opacity-0 pointer-events-none" : "opacity-100"
+          }`}
+        >
+          {files &&
+            files.isDir &&
+            [...files.children]
               .sort((a, b) => {
                 if (a.isDir && !b.isDir) return -1;
                 if (!a.isDir && b.isDir) return 1;
                 return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
               })
               .map((file) => {
-                const encodedPath = encodeURIComponent(currentPath.join("/") + "/cache/" + file.hash + ".pdf");
-                const fileUrl = `${API_URL}/api/v1/datasources/${encodeURIComponent(selectedSource!)}/fs/file?path=${encodedPath}`;
+                const encodedPath = encodeURIComponent(
+                  currentPath.join("/") + "/cache/" + file.hash + ".pdf"
+                );
+                const fileUrl = `${API_URL}/api/v1/datasources/${encodeURIComponent(
+                  selectedSource!
+                )}/fs/file?path=${encodedPath}`;
 
                 if (file.isDir) {
                   return (
                     <button
                       key={file.name}
-                      onClick={() => setCurrentPath([...currentPath, file.name])}
+                      onClick={() => {
+                        setFilesLoading(true);
+                        setTimeout(() => setCurrentPath([...currentPath, file.name]), 50);
+                      }}
                       className="group transition-transform duration-200 hover:shadow-xl rounded-2xl border border-gray-300 shadow-sm bg-white overflow-hidden flex flex-col items-center justify-center p-6 cursor-pointer"
                       title={file.name}
                     >
@@ -227,6 +273,7 @@ export default function Home() {
                             renderTextLayer={false}
                             renderAnnotationLayer={false}
                             renderMode="canvas"
+                            className="transition-opacity duration-300"
                           />
                         </Document>
                       </div>
@@ -237,12 +284,8 @@ export default function Home() {
                   );
                 }
               })}
-          </div>
-        )}
+        </div>
       </main>
-
-
-
     </div>
   );
 }
