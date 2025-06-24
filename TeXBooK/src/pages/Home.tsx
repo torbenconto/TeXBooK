@@ -31,6 +31,10 @@ export default function Home() {
   const [ping, setPing] = useState<number | null>(null);
   const [currentPath, setCurrentPath] = useState<string[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
+  const [showAddSource, setShowAddSource] = useState(false);
+  const [newSourceName, setNewSourceName] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
+  const [newSourcePath, setNewSourcePath] = useState("");
 
   useEffect(() => {
     const pathParam = searchParams.get("path");
@@ -152,6 +156,16 @@ export default function Home() {
               </option>
             ))}
           </select>
+          <button
+            onClick={() => {
+              setNewSourceName("");
+              setAddError(null);
+              setShowAddSource(true);
+            }}
+            className="ml-2 px-2 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700 transition-colors"
+          >
+            + Add Source
+          </button>
         </div>
       </header>
 
@@ -264,8 +278,10 @@ export default function Home() {
                       className="group transition-transform duration-200 hover:shadow-xl rounded-2xl border border-gray-300 shadow-sm bg-white overflow-hidden"
                     >
                       <div className="aspect-[8.5/11] w-full bg-gray-50 flex items-center justify-center overflow-hidden">
+                      {fileUrl && (
                         <Document
                           file={fileUrl}
+                          key={fileUrl}
                           loading={
                             <div className="text-gray-400 text-sm">Loading preview…</div>
                           }
@@ -281,6 +297,7 @@ export default function Home() {
                             className="transition-opacity duration-300"
                           />
                         </Document>
+                      )}
                       </div>
                       <div className="p-3 border-t border-gray-200">
                         <p className="text-sm text-center text-gray-700 truncate">{file.name}</p>
@@ -291,6 +308,67 @@ export default function Home() {
               })}
         </div>
       </main>
+      {showAddSource && (
+        <div className="fixed inset-0 bg-white/30 backdrop-blur-md flex justify-center items-center z-50">
+          <div className="bg-white p-6 rounded-sm shadow-lg w-full max-w-md">
+            <h2 className="text-lg font-semibold mb-4">Add New Source</h2>
+            <input
+              type="text"
+              placeholder="Source name"
+              value={newSourceName}
+              onChange={(e) => setNewSourceName(e.target.value)}
+              className="w-full border border-gray-300 rounded px-3 py-2 mb-2"
+            />
+            <input
+              type="text"
+              placeholder="Path (e.g., /mnt/data/docs)"
+              value={newSourcePath}
+              onChange={(e) => setNewSourcePath(e.target.value)}
+              className="w-full border border-gray-300 rounded px-3 py-2 mb-4"
+            />
+
+
+            {addError && <p className="text-red-600 text-sm mb-2">{addError}</p>}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowAddSource(false)}
+                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setAddError(null);
+                  try {
+                    const res = await fetch(`${API_URL}/api/v1/datasources/add`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ name: newSourceName, path: newSourcePath, type: "local" }),
+                    });
+                    if (!res.ok) {
+                      const text = await res.text();
+                      throw new Error(text || `Failed to add source`);
+                    }
+
+                    setShowAddSource(false);
+                    setNewSourceName("");
+
+                    const refetch = await fetch(`${API_URL}/api/v1/datasources/list`);
+                    const json = await refetch.json();
+                    setData(json);
+                    setSelectedSource(json[json.length - 1]?.name || json[0]?.name || "");
+                  } catch (err: any) {
+                    setAddError(err.message || "Failed to add");
+                  }
+                }}
+                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
