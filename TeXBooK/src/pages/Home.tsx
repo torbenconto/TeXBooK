@@ -97,16 +97,26 @@ export default function Home() {
 
   useEffect(() => {
     async function fetchPing() {
-        const res = await fetch(
-          `${API_URL}/api/v1/ping`
-        );
-        const json = await res.json();
-        setPing(json.latency || 0)
+      const start = performance.now();
 
+      try {
+        const res = await fetch(`${API_URL}/api/v1/ping`);
+        const json = await res.json();
+
+        const end = performance.now();
+        const latency = end - start;
+
+        setPing(latency);
+      } catch (err) {
+        console.error("Ping failed:", err);
+        setPing(null);
+      }
     }
 
-    fetchPing()
-  }, [])
+    setInterval(fetchPing, 5000)
+
+    fetchPing();
+  }, []);
 
   if (loading) return <p>Loading data sources...</p>;
   if (error) return <p className="text-red-600">Error: {error}</p>;
