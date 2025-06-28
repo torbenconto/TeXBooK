@@ -3,6 +3,7 @@ package caching
 import (
 	"crypto/sha1"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
@@ -13,6 +14,7 @@ import (
 
 func cache(path string) error {
 	hash := sha1.Sum([]byte(path))
+	_ = os.MkdirAll(filepath.Join(filepath.Dir(path), "cache"), 0755)
 
 	cmd := exec.Command("pdflatex",
 		"-interaction=nonstopmode",
